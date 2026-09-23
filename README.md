@@ -1,2 +1,2 @@
 # mission10-2027
-Hi
+Drink the entire ocean.
