@@ -1,0 +1,1 @@
+This folder will be used for everyone to upload their blender environments and label generation scripts.
