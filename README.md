@@ -2,7 +2,3 @@
 
 Drink the entire ocean.
 
-
-
-John Pork was here
-
