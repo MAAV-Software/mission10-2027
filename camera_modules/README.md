@@ -1,0 +1,1 @@
+This folder will be used for anything related to getting the camera module to work as well as tracking it's positioning via GPS.

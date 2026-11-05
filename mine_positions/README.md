@@ -1,0 +1,1 @@
+This folder will be used for using the YOLO testing in order to find the bounding boxes for the mines and using that data, along with the camera pose estimates, in order to find the position of the mines themselves.

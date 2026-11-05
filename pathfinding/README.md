@@ -1,0 +1,1 @@
+This folder will be used to house our pathfinding algorithm, once we have the mine locations marked down.
