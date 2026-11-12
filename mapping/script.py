@@ -3,6 +3,10 @@ import numpy
 
 camera_pos = {'x': 0, 'y': 3.0338, 'z': 2}
 camera_resolution = {'x': 3280, 'y': 2464}
+camera_angle = math.radians(45);
+drone_rotation = math.radians(45);
+drone_mid_dist = camera_pos['z'] * math.tan(camera_angle)
+middle_pos = {'x': camera_pos['x'] + drone_mid_dist * math.sin(drone_rotation), 'y': camera_pos['y'] + drone_mid_dist * math.cos(drone_rotation)}
 
 HFOV = 62.2
 VFOV = 48.8
@@ -27,9 +31,8 @@ y_local_dist = mine_y_local - 0.5
 x_global_dist = x_local_dist * x_prime
 y_global_dist = y_local_dist * y_prime
 
-print(x_global_dist)
-mine_global_x = camera_pos['x'] + x_global_dist
 
-mine_global_y = camera_pos['y'] - y_global_dist
+mine_global_x = middle_pos['x'] + x_global_dist
+mine_global_y = middle_pos['y'] - y_global_dist
 
 print(f'mine_global_x: {mine_global_x}, mine_global_y: {mine_global_y}')
