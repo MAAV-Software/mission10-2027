@@ -1,27 +1,15 @@
-"""
-mine_locator.py - find where a mine is on the field from where it appears in a drone photo.
-
-How it works (per detected mine):
-  1. photo position (u, v)  -> the direction the camera was looking   (camera frame)
-  2. rotate that direction by the camera's tilt / heading           (world frame)
-  3. follow that ray down until it hits the ground                  (ray-plane intersection)
-  4. optional: redo step 3 with the real terrain height until it settles (bumpy ground)
-
-Conventions (same as Blender):
-  world   x = east, y = north, z = up, meters
-  image   u = right, v = down, both 0-1, (0, 0) = top-left corner  (YOLO convention)
-  camera  rotation is Blender's XYZ Euler, in degrees
-            rot_x = tilt     0 = straight down, 45 = looking 45 deg ahead, 90 = at the horizon
-            rot_y = keep 0 for a normal drone gimbal
-            rot_z = heading  0 = top of the photo faces +y (north), positive = counter-clockwise
-          A compass heading (clockwise from north) converts as rot_z = -compass_deg.
-"""
-
 import math
 from dataclasses import dataclass
 
+# ============================================================================= Blender test settings
 
-# ----------------------------------------------------------------------------- vector helpers
+# drone pose to test in Blender: (x, y, z, tilt_deg, heading_deg), or None for the scene camera
+TEST_CAMERA = (0.0, 0.0, 3.4, 45.0, 0.0)
+GROUND_OBJECT = "grass_blend"
+MINES_COLLECTION = "Mines"
+
+
+# ============================================================================= vector helpers
 
 def _add(a, b):
     return (a[0] + b[0], a[1] + b[1], a[2] + b[2])
@@ -51,7 +39,7 @@ def _column(m, i):
     return (m[0][i], m[1][i], m[2][i])
 
 
-# ----------------------------------------------------------------------------- camera
+# ============================================================================= camera
 
 @dataclass
 class Camera:
@@ -77,10 +65,10 @@ class Camera:
         return right, _scale(up, -1), _scale(back, -1)
 
 
-# ----------------------------------------------------------------------------- core math
+# ============================================================================= core math
 
 def pixel_to_ray(cam, u, v):
-    """Step 1 + 2: photo position (u, v) -> direction in world space (not normalized)."""
+    """Steps 1 + 2: photo position (u, v) -> direction in world space (not normalized)."""
     xn = (2 * u - 1) * math.tan(math.radians(cam.hfov) / 2)   # sideways, per unit forward
     yn = (2 * v - 1) * math.tan(math.radians(cam.vfov) / 2)   # downward, per unit forward
     right, down, forward = cam.axes()
@@ -89,7 +77,7 @@ def pixel_to_ray(cam, u, v):
 
 def pixel_to_ground(cam, u, v, ground_z=0.0, terrain=None, max_iters=20, tol=1e-4):
     """
-    Step 3 (+4): where the pixel's ray hits the ground.
+    Steps 3 (+4): where the pixel's ray hits the ground.
 
     ground_z  height of the ground in world z, used when the ground is treated as flat
     terrain   optional function terrain(x, y) -> ground z, for bumpy ground. The ray is
@@ -102,6 +90,9 @@ def pixel_to_ground(cam, u, v, ground_z=0.0, terrain=None, max_iters=20, tol=1e-
         return None                               # never comes back down to the ground
 
     z = terrain(cam.x, cam.y) if terrain else ground_z
+    if z is None:
+        z = ground_z
+    p = None
     for _ in range(max_iters):
         t = (z - cam.z) / d[2]                    # how far along the ray to drop to height z
         p = _add(cam.position, _scale(d, t))
@@ -130,7 +121,7 @@ def ground_to_pixel(cam, x, y, z=0.0):
     return u, v
 
 
-# ----------------------------------------------------------------------------- YOLO labels
+# ============================================================================= YOLO labels
 
 def read_yolo(path):
     """Read a YOLO label file -> list of (class_id, x_center, y_center, width, height)."""
@@ -167,9 +158,9 @@ def locate_file(label_path, cam, ground_z=0.0, terrain=None, point="center"):
     return locate_boxes(read_yolo(label_path), cam, ground_z, terrain, point)
 
 
-# ----------------------------------------------------------------------------- self-test
+# ============================================================================= self-test (Terminal)
 
-def _self_test():
+def self_test():
     import random
 
     # 1. worked example: 3.16 m up, tilted 45 deg, facing north, mine at (0.6, 0.3) in the photo
@@ -211,9 +202,82 @@ def _self_test():
     print("all self-tests passed (worst round-trip error %.1e)" % worst)
 
 
-# ----------------------------------------------------------------------------- command line
+# ============================================================================= Blender scene check
 
-if __name__ == "__main__":
+def blender_check(test_camera=TEST_CAMERA):
+    """Project every mine into a test photo, locate it back, and compare with the truth."""
+    import bpy
+    from mathutils import Vector, Euler
+    from bpy_extras.object_utils import world_to_camera_view
+
+    scene = bpy.context.scene
+    ground = bpy.data.objects[GROUND_OBJECT]
+
+    def terrain_height(x, y):
+        """Ground height at (x, y): shoot a ray straight down onto the terrain mesh."""
+        mw = ground.matrix_world
+        inv = mw.inverted()
+        origin = inv @ Vector((x, y, 100.0))
+        direction = (inv.to_3x3() @ Vector((0, 0, -1))).normalized()
+        hit, loc, _, _ = ground.ray_cast(origin, direction)
+        return (mw @ loc).z if hit else None
+
+    # temporary test camera - the scene camera is left untouched
+    cam_obj = bpy.data.objects.new("_locator_test_cam", scene.camera.data)
+    try:
+        if test_camera is None:
+            cam_obj.matrix_world = scene.camera.matrix_world.copy()
+        else:
+            x, y, z, tilt, heading = test_camera
+            m = Euler((math.radians(tilt), 0, math.radians(heading)), "XYZ").to_matrix().to_4x4()
+            m.translation = (x, y, z)
+            cam_obj.matrix_world = m
+
+        loc = cam_obj.matrix_world.translation
+        rot = cam_obj.matrix_world.to_euler("XYZ")
+        # field of view straight from the Blender camera, so the test matches its renders
+        tan_h = math.tan(cam_obj.data.angle_x / 2)
+        tan_v = tan_h * scene.render.resolution_y / scene.render.resolution_x
+        cam = Camera(loc.x, loc.y, loc.z,
+                     rot_x=math.degrees(rot.x), rot_y=math.degrees(rot.y), rot_z=math.degrees(rot.z),
+                     hfov=math.degrees(2 * math.atan(tan_h)), vfov=math.degrees(2 * math.atan(tan_v)))
+
+        print("\ncamera at (%.2f, %.2f, %.2f), tilt %.1f deg, heading %.1f deg, fov %.1f x %.1f deg"
+              % (cam.x, cam.y, cam.z, cam.rot_x, cam.rot_z, cam.hfov, cam.vfov))
+        print("%-10s %7s %7s | %8s %8s | %10s %10s"
+              % ("mine", "u", "v", "true x", "true y", "flat err", "terr err"))
+
+        flat_errs, terr_errs = [], []
+        for mine in bpy.data.collections[MINES_COLLECTION].objects:
+            true = mine.matrix_world.translation
+            p = world_to_camera_view(scene, cam_obj, true)
+            if not (0 <= p.x <= 1 and 0 <= p.y <= 1 and p.z > 0):
+                continue                                       # not in this photo
+            u, v = p.x, 1 - p.y                                # Blender's y goes up, images go down
+
+            under_cam = terrain_height(cam.x, cam.y) or 0.0
+            flat = pixel_to_ground(cam, u, v, ground_z=under_cam)       # pretend the field is flat
+            terr = pixel_to_ground(cam, u, v, terrain=terrain_height)   # use the real terrain
+            fe = math.dist(flat[:2], true.xy) if flat else float("nan")
+            te = math.dist(terr[:2], true.xy) if terr else float("nan")
+            flat_errs.append(fe)
+            terr_errs.append(te)
+            print("%-10s %7.3f %7.3f | %8.3f %8.3f | %8.1f cm %8.1f cm"
+                  % (mine.name, u, v, true.x, true.y, fe * 100, te * 100))
+    finally:
+        bpy.data.objects.remove(cam_obj)                       # clean up the temporary camera
+
+    if flat_errs:
+        print("\n%d mines in view | flat ground: worst %.1f cm | real terrain: worst %.1f cm"
+              % (len(flat_errs), max(flat_errs) * 100, max(terr_errs) * 100))
+    else:
+        print("\nno mines in view - change TEST_CAMERA")
+    return flat_errs, terr_errs
+
+
+# ============================================================================= entry point
+
+def _cli():
     import argparse
 
     ap = argparse.ArgumentParser(description="Locate mines on the field from a YOLO label file.")
@@ -227,14 +291,15 @@ if __name__ == "__main__":
     args = ap.parse_args()
 
     if not args.labels:
-        _self_test()
-    else:
-        if not args.cam:
-            ap.error("--cam X Y Z is required with a label file")
-        cam = Camera(*args.cam, rot_x=args.tilt, rot_z=args.heading, hfov=args.hfov, vfov=args.vfov)
-        for r in locate_file(args.labels, cam, ground_z=args.ground):
-            if r["x"] is None:
-                print(f"class {r['class']}: box at ({r['u']:.3f}, {r['v']:.3f}) is above the horizon")
-            else:
-                print(f"class {r['class']}: box at ({r['u']:.3f}, {r['v']:.3f}) -> "
-                      f"field ({r['x']:.3f}, {r['y']:.3f}) m")
+        self_test()
+        return
+    if not args.cam:
+        ap.error("--cam X Y Z is required with a label file")
+    cam = Camera(*args.cam, rot_x=args.tilt, rot_z=args.heading, hfov=args.hfov, vfov=args.vfov)
+    for r in locate_file(args.labels, cam, ground_z=args.ground):
+        if r["x"] is None:
+            print(f"class {r['class']}: box at ({r['u']:.3f}, {r['v']:.3f}) is above the horizon")
+        else:
+            print(f"class {r['class']}: box at ({r['u']:.3f}, {r['v']:.3f}) -> "
+                  f"field ({r['x']:.3f}, {r['y']:.3f}) m")
+
