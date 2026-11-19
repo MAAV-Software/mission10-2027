@@ -13,7 +13,8 @@ class NetworkingServer:
     def run(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind(("localhost", 8000))
+        # 0.0.0.0 = accept connections from other computers, not just this one
+        sock.bind(("0.0.0.0", 8001))
         sock.listen()
         print("Waiting for a client to connect...", flush=True)
 

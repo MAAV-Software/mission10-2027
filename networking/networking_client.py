@@ -17,7 +17,7 @@ class NetworkingClient:
 
     def run(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.connect(("localhost", 8000))
+        sock.connect(("35.3.219.215", 8000))
         reader = sock.makefile("r", encoding="utf-8")
 
         for detection in self.coordinates:
