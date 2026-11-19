@@ -186,7 +186,7 @@ print(f"Done: {num_images - num_val} train, {num_val} val")
 # ---------------- Video ----------------
 # Uses images from both train and val, in the order they were shot
 first = cv2.imread(rendered_images[0])
-height, width, _ = first.shape
+height, width, _ = first.shapex 
 
 fps = 24.0
 duration_per_image = 0.2

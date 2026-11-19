@@ -4,12 +4,15 @@ import json
 
 class NetworkingClient:
 
-    def __init__(self, insults):
-        self.insults = insults
+    def __init__(self, coordinates):
+        self.coordinates = coordinates
 
-    def send(self, sock, message):
-        print(f"[Person 1]: {message}", flush=True)
-        msg = json.dumps({"message": message}) + "\n"
+    def send(self, sock, detection):
+        box = detection["bounding_box"]
+        cam = detection["camera_pos"]
+        print(f"[Client] local:  box ({box['x_min']}, {box['y_min']}) -> ({box['x_max']}, {box['y_max']}) "
+              f"from camera at ({cam['x']}, {cam['y']}, {cam['z']})", flush=True)
+        msg = json.dumps(detection) + "\n"
         sock.sendall(msg.encode("utf-8"))
 
     def run(self):
@@ -17,40 +20,35 @@ class NetworkingClient:
         sock.connect(("localhost", 8000))
         reader = sock.makefile("r", encoding="utf-8")
 
-        self.send(sock, self.insults[0])
-
-        while True:
+        for detection in self.coordinates:
+            self.send(sock, detection)
             line = reader.readline()
             if not line:
-                break
-
-            reply = json.loads(line)["message"]
-
-            index = self.insults.index(reply)
-            if index + 1 >= len(self.insults):
-                break
-
-            insult = self.insults[index + 1]
-            self.send(sock, insult)
-
-            if insult == self.insults[-1]:
                 break
 
         sock.close()
         print("Conversation finished.")
 
 
-INSULTS = ["Watch it jerk", "Shut up idiot",
-           "Moron", "Scab eater",
-           "Butt sniffer", "pus licker",
-           "Fart smeller", "You eat dog crap for breakfast",
-           "Geek", "You mixed your weeds with your mama’s toe jam",
-           "You bob for apples in the toilet and you like it", "You play ball like a girl",
-           "What did you say to me?", "You heard what i said",
-           "Tomorrow, noon, here at our field, get the buffalo butt breather",
-           "Count on it pee crap drinking face"]
+CAMERA_RES = {"x": 1920, "y": 1080}
+HFOV = 69
+VFOV = 42
+
+TEST_COOR = [
+    {"camera_pos": {"x": 0, "y": 0, "z": 10},
+     "bounding_box": {"x_min": 940, "y_min": 520, "x_max": 980, "y_max": 560}},
+    {"camera_pos": {"x": 0, "y": 0, "z": 10},
+     "bounding_box": {"x_min": 100, "y_min": 100, "x_max": 160, "y_max": 160}},
+    {"camera_pos": {"x": 5, "y": 2, "z": 8},
+     "bounding_box": {"x_min": 1500, "y_min": 800, "x_max": 1560, "y_max": 860}},
+    {"camera_pos": {"x": -3, "y": 4, "z": 12},
+     "bounding_box": {"x_min": 300, "y_min": 900, "x_max": 340, "y_max": 940}},
+]
+
+for detection in TEST_COOR:
+    detection.update({"camera_res": CAMERA_RES, "HFOV": HFOV, "VFOV": VFOV})
 
 
 if __name__ == "__main__":
-    client = NetworkingClient(INSULTS)
+    client = NetworkingClient(TEST_COOR)
     client.run()
